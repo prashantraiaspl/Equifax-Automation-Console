@@ -138,7 +138,9 @@ namespace EquifaxRPA.SERVICES
 
             //_logger.LogInformation("New Request Generated and Inserted in DB");
 
-            return await ProcessRequestWithBrowserAutomationAsync(requestDto, loginCredentials);
+            var response = await ProcessRequestWithBrowserAutomationAsync(requestDto, loginCredentials);
+
+            return response;
         }
 
 
@@ -157,87 +159,96 @@ namespace EquifaxRPA.SERVICES
             }
 
             // Continue last request if not completed or cancelled
-            return await ProcessRequestWithBrowserAutomationAsync(requestDto, loginCredentials);
+            var response = await ProcessRequestWithBrowserAutomationAsync(requestDto, loginCredentials);
+
+            return response;
         }
 
 
 
         private async Task<ResponseBody> ProcessRequestWithBrowserAutomationAsync(DisputeRequestDto requestDto, LoginCredentialRequestDto loginCredentials)
         {
-            //_logger.LogInformation($"Starting Browser Automation for URL: {_scrappingUrl}");
-            string _scrappingUrl = ConfigurationManager.AppSettings["ScrappingURL"].ToString();
+            ResponseBody finalresponse = new ResponseBody();
 
-            Console.WriteLine($"Starting Browser Automation for URL: {_scrappingUrl}");
-
-
-            ResponseBody result = await _browserUtility.BrowserAutomationProcess(_scrappingUrl, loginCredentials, requestDto);
-
-            //_logger.LogError(result.message);
-
-            if (result.status)
+            try
             {
-                if (result.data.comment == "Success")
+                //_logger.LogInformation($"Starting Browser Automation for URL: {_scrappingUrl}");
+                string _scrappingUrl = ConfigurationManager.AppSettings["ScrappingURL"].ToString();
+
+                Console.WriteLine($"Starting Browser Automation for URL: {_scrappingUrl}");
+
+
+                ResponseBody result = await _browserUtility.BrowserAutomationProcess(_scrappingUrl, loginCredentials, requestDto);
+
+                //_logger.LogError(result.message);
+
+                if (result.status)
                 {
-                    //List<RequestMaster> updatedRequests = new List<RequestMaster>();
-
-                    foreach (var account in requestDto.equifax_data.account)
+                    if (result.data.comment == "Success")
                     {
-                        var response = new RequestMaster
-                        {
-                            user_name = requestDto.user_name,
-                            user_password = requestDto.user_password,
-                            client_id = requestDto.client_id,
-                            dispute_type = requestDto.dispute_type,
-                            credit_repair_id = account.credit_repair_id,
-                            creditor_name = account.creditor_name,
-                            account_number = account.account_number,
-                            credit_balance = account.credit_balance,
-                            open_date = account.open_date,
-                            creditor = account.creditor,
-                            ownership = account.ownership,
-                            accuracy = account.accuracy[0] + ", " + account.accuracy[1],
-                            comment = result.data.comment,
-                            file_number = result.data.file_number,
-                            estimated_completion_date = account.estimated_completion_date,
-                            submitted_date = result.data.submitted_date,
-                            request_status = "Completed"
-                        };
+                        //List<RequestMaster> updatedRequests = new List<RequestMaster>();
 
-                        //var updateResult = await _requestRepository.UpdateRequest(response);
-                        await _requestRepository.UpdateRequestAsync(response);
+                        foreach (var account in requestDto.equifax_data.account)
+                        {
+                            var response = new RequestMaster
+                            {
+                                user_name = requestDto.user_name,
+                                user_password = requestDto.user_password,
+                                client_id = requestDto.client_id,
+                                dispute_type = requestDto.dispute_type,
+                                credit_repair_id = account.credit_repair_id,
+                                creditor_name = account.creditor_name,
+                                account_number = account.account_number,
+                                credit_balance = account.credit_balance,
+                                open_date = account.open_date,
+                                creditor = account.creditor,
+                                ownership = account.ownership,
+                                accuracy = account.accuracy[0] + ", " + account.accuracy[1],
+                                comment = result.data.comment,
+                                file_number = result.data.file_number,
+                                estimated_completion_date = account.estimated_completion_date,
+                                submitted_date = result.data.submitted_date,
+                                request_status = "Completed"
+                            };
+
+                            //var updateResult = await _requestRepository.UpdateRequest(response);
+                            await _requestRepository.UpdateRequestAsync(response);
+                        }
+                    }
+
+                    // Common API Logic for All Cases Error, Review, Success.
+                    var accountList = CreateAccountList(requestDto, result);
+                    var requestBody = CreateRequestBody(requestDto, accountList);
+
+                    bool apiCallSuccess = await SendApiRequestAsync(requestBody);
+
+                    if (apiCallSuccess)
+                    {
+                        finalresponse.status = true;
+                        finalresponse.message = "Dispute Request Processed Successfully.";
+                        finalresponse.data = requestBody;
+                    }
+                    else
+                    {
+                        finalresponse.status = false;
+                        finalresponse.message = "Something went wrong with API Calling.";
                     }
                 }
-
-                // Common API Logic for All Cases Error, Review, Success.
-                var accountList = CreateAccountList(requestDto, result);
-                var requestBody = CreateRequestBody(requestDto, accountList);
-
-                var apiCallSuccess = await SendApiRequestAsync(requestBody);
-
-                if (!apiCallSuccess && result.data.comment == "Success")
+                else
                 {
-                    return new ResponseBody
-                    {
-                        status = false,
-                        message = "API Calling Failed."
-                    };
+                    finalresponse.status = false;
+                    finalresponse.message = "Something went wrong with the browser automation process.";
                 }
-
-                return new ResponseBody
-                {
-                    status = apiCallSuccess,
-                    message = apiCallSuccess ? "Dispute Request Processed Successfully." : "Failed to process dispute request.",
-                    data = requestBody
-                };
             }
-            else
+            catch (Exception ex)
             {
-                return new ResponseBody
-                {
-                    status = false,
-                    message = "Something went wrong."
-                };
+                Console.WriteLine(ex.ToString());
+
+                finalresponse.status = false;
+                finalresponse.message = "Something went wrong with the browser automation process.";
             }
+
+            return finalresponse;
         }
 
 
@@ -300,13 +311,13 @@ namespace EquifaxRPA.SERVICES
                     if (response.IsSuccessStatusCode)
                     {
                         var apiResponse = await response.Content.ReadAsStringAsync();
-                        Console.WriteLine(apiResponse);
+                        Console.WriteLine($"API REQUEST: {apiResponse}");
                         return true;
                     }
                     else
                     {
                         var errorResponse = await response.Content.ReadAsStringAsync();
-                        Console.WriteLine(errorResponse);
+                        Console.WriteLine($"API REQUEST: {errorResponse}");
                         return false;
                     }
                 }

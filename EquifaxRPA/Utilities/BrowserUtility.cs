@@ -58,8 +58,10 @@ namespace Equifax.Api.Utilities
                 //-------------Step 4: File a Dispute-------------//
                 response = await _fileDisputeUtility.FileDisputeAsync(disputeRequest, driver);
 
+                _sleepLoader.Seconds(5);
+
                 //-------------Step 5: Close the Browser-------------//
-                //_closeBrowserUtility.CloseBrowser(driver);
+                _closeBrowserUtility.CloseBrowser(driver);
             }
             catch (Exception ex)
             {
